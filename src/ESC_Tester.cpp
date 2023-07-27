@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <Servo.h>
 #include "Streaming.h"
 #include "Average.h"
@@ -47,8 +48,14 @@ float resistor2 = 4700;
 #define RPMin 3
 #define PWMen 9
 // Analog input
+
+#if defined(ARDUINO_ARCH_RP2040)
+#define VDCin A0
+#define ADCin A1
+#else
 #define VDCin A4
 #define ADCin A2
+#endif
 
 unsigned long interval = 2000; //Default 1s
 
@@ -112,6 +119,59 @@ unsigned long lastmillis_rpm = 0;
 Average<float> ave_VDC(BUFFER);
 Average<float> ave_ADC(BUFFER);
 Average<float> ave_RPM(10);
+
+void getMultimeter() {
+        //volt
+        //volt = (analogRead(VDCin) / 1023.0) * 46.73; //
+        volt = (analogRead(VDCin) * (5.0 / 1023.0));
+        volt = volt / denominator;
+        //volt = (slope_V * volt) + intercept_A;
+        ave_VDC.push(volt);
+
+        //ampere
+        while (acs_offset == 0) {
+                for (int i = 0; i < 10; i++) {
+                        acs_offset += analogRead(ADCin);
+                }
+                acs_offset /= 10; //create the offset
+                acs_offset = (acs_offset / 1023.0) * 5000; // Gets you mV
+        }
+
+        RawValue = analogRead(ADCin);
+        Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
+        Amps = ((Voltage - ACSoffset) / mVperAmp);
+        //Amps = ((Voltage - acs_offset) / mVperAmp);
+        Amps = (slope_A * Amps) + intercept_A;
+        //Serial << "Current:\t" << _FLOAT(Amps,3) << endl;
+        ave_ADC.push(abs(Amps));
+
+        //watt
+        watt = ave_VDC.mean() * ave_ADC.mean();
+}
+
+void RPM (){
+        // rpm = (1000000.0/(micros() - micros1))*60;
+        // ave_RPM.push(rpm);
+        // micros1 = micros();
+        // rpm_present = 1;
+        rpmcount++;
+}
+
+void SerialFlush(){
+        incomingString = "";
+        incomingByte = 0;
+        Serial.flush();
+}
+
+void slope_intercept(Calibration cali){
+        Serial << "Measured Value1: " << _FLOAT(cali.incoming1,2) << " Sensor Value1: " << _FLOAT(cali.volt1,2) << endl;
+        Serial << "Measured Value2: " << _FLOAT(cali.incoming2,2) << " Sensor Value2: " << _FLOAT(cali.volt2,2) << endl;
+
+        cali.slope = (cali.volt2 - cali.volt1)/(cali.incoming2 - cali.incoming1); // Slope = (Sensor Value 2 – Sensor Value 1)/(V2 – V1)
+        cali.intercept = cali.volt2 - (cali.slope * cali.incoming2);   // Intercept = Sensor Value 2 – slope * V2
+        Serial << "slope:\t" << _FLOAT(cali.slope,6)<< endl;
+        Serial << "intercept:\t" << _FLOAT(cali.intercept,6)<< endl;
+}
 
 
 void setup()
@@ -408,57 +468,4 @@ void loop(){
                 }
         }
         //delay(10);
-}
-
-void getMultimeter() {
-        //volt
-        //volt = (analogRead(VDCin) / 1023.0) * 46.73; //
-        volt = (analogRead(VDCin) * (5.0 / 1023.0));
-        volt = volt / denominator;
-        //volt = (slope_V * volt) + intercept_A;
-        ave_VDC.push(volt);
-
-        //ampere
-        while (acs_offset == 0) {
-                for (int i = 0; i < 10; i++) {
-                        acs_offset += analogRead(ADCin);
-                }
-                acs_offset /= 10; //create the offset
-                acs_offset = (acs_offset / 1023.0) * 5000; // Gets you mV
-        }
-
-        RawValue = analogRead(ADCin);
-        Voltage = (RawValue / 1023.0) * 5000; // Gets you mV
-        Amps = ((Voltage - ACSoffset) / mVperAmp);
-        //Amps = ((Voltage - acs_offset) / mVperAmp);
-        Amps = (slope_A * Amps) + intercept_A;
-        //Serial << "Current:\t" << _FLOAT(Amps,3) << endl;
-        ave_ADC.push(abs(Amps));
-
-        //watt
-        watt = ave_VDC.mean() * ave_ADC.mean();
-}
-
-void RPM (){
-        // rpm = (1000000.0/(micros() - micros1))*60;
-        // ave_RPM.push(rpm);
-        // micros1 = micros();
-        // rpm_present = 1;
-        rpmcount++;
-}
-
-void SerialFlush(){
-        incomingString = "";
-        incomingByte = 0;
-        Serial.flush();
-}
-
-void slope_intercept(Calibration cali){
-        Serial << "Measured Value1: " << _FLOAT(cali.incoming1,2) << " Sensor Value1: " << _FLOAT(cali.volt1,2) << endl;
-        Serial << "Measured Value2: " << _FLOAT(cali.incoming2,2) << " Sensor Value2: " << _FLOAT(cali.volt2,2) << endl;
-
-        cali.slope = (cali.volt2 - cali.volt1)/(cali.incoming2 - cali.incoming1); // Slope = (Sensor Value 2 – Sensor Value 1)/(V2 – V1)
-        cali.intercept = cali.volt2 - (cali.slope * cali.incoming2);   // Intercept = Sensor Value 2 – slope * V2
-        Serial << "slope:\t" << _FLOAT(cali.slope,6)<< endl;
-        Serial << "intercept:\t" << _FLOAT(cali.intercept,6)<< endl;
 }
